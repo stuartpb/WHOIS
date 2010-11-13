@@ -10,10 +10,12 @@ local function loader(env)
     print(result)
   end
   if func then return func(env)
-  else return 500, { ["Content-Type"] = "text/plain" },
-    coroutine.wrap(function()
-      coroutine.yield"The server wasn't started with a working file. Whoops."
-    end)
+  else
+    return 500, { ["Content-Type"] = "text/plain" },
+      coroutine.wrap(function()
+        coroutine.yield"The server wasn't started with a working file. Whoops."
+      end)
+  end
 end
 
 xavante.HTTP{
