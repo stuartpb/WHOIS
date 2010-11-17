@@ -1,16 +1,8 @@
 local udc = require "urldecode"
-
-local function get(datum,uid)
-  local result
-  local file=io.open("/home/lolol/"..datum..'/'..uid)
-  if file then result=file:read'*a'; file:close() end
-  return result
-end
-
-local function set(datum,uid,content)
-  local file=io.open("/home/lolol/"..datum..'/'..uid,'w')
-  if file then file:write(content); file:close() end
-end
+local data = require "lolol.data"
+require "crypto"
+local hmac = require "crypto.hmac"
+local keys = require "lolol.keys"
 
 local cy=coroutine.yield
 
@@ -21,12 +13,28 @@ return function(env)
   local tel = params.tel or "+16107610054"
   local uid = params.uid or "1277842"
   local act = params.act or "REQ"
+  local rqt = params.rqt
+  local kwd = params.kwd
   local sig = params.sig
 
-  print(os.date("Message recieved %c"))
-  print("body:", msg)
+  local digest=kwd and tel and rqt
+    and hmac.digest("md5",kwd..tel..rqt,keys.lolol_token)
+  local signed = sig == digest
+
+  print(os.date("Message recieved %c",rqt and tonumber(rqt)))
+  if act=="REQ" then
+    print("body:", msg)
+  else
+    print("action:",act)
+  end
   print("from:", tel)
   --print("UID:", uid)
+  if signed then print "Signature OK"
+  else
+    print("Sig recieved:",sig)
+    print("Sig expected:",digest)
+  end
+  print"---"
 
   set("tels",uid,tel)
 
