@@ -1,8 +1,19 @@
 local udc = require "urldecode"
-local data = require "lolol.data"
+local data = require "data.filesystem"
 require "crypto" --stupid hmac can't just be included directly
 local hmac = require "crypto.hmac"
-local keys = require "lolol.keys"
+
+
+local function readfilestr(fname)
+  local f=io.open(fname,"r")
+  if f then
+    local r=f:read"*l"
+    f:close()
+    return r
+  else return nil end
+end
+
+local lolol_token = readfilestr"keys/lolol-token"
 
 local cy=coroutine.yield
 
@@ -22,7 +33,7 @@ return function(env)
   local sig = params.sig
 
   local digest=kwd and tel and rqt
-    and hmac.digest("md5",kwd..tel..rqt,keys.lolol_token)
+    and hmac.digest("md5",kwd..tel..rqt,lolol_token)
   local signed = sig and sig == digest
 
   print(os.date("Message recieved %c",rqt and tonumber(rqt)))
