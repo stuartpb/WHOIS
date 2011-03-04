@@ -3,7 +3,7 @@ local data = require "data.filesystem"
 require "crypto" --stupid hmac can't just be included directly
 local hmac = require "crypto.hmac"
 
-
+--function to read in line from a file
 local function readfilestr(fname)
   local f=io.open(fname,"r")
   if f then
@@ -14,6 +14,10 @@ local function readfilestr(fname)
 end
 
 local lolol_token = readfilestr"keys/lolol-token"
+local git_dir = readfilestr"config/git-dir"
+
+local git_log_cmd=table.concat({"git","--git-dir",git_dir,
+  "--no-pager", "log", "-1", "--date=relative"}," ")
 
 local cy=coroutine.yield
 
