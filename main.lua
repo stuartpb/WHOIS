@@ -1,3 +1,4 @@
+-- encryption / verification ------------------------------------------------
 local hmac; do
   local rep = string.rep
   local blocksize = 64
@@ -15,64 +16,78 @@ local hmac; do
     return hexh(xor(key,opad) .. h(xor(key,ipad)..message))
   end
 end
+-----------------------------------------------------------------------
 
+-- local toolbox ------------------------------------------------------
 local format = string.format
 local gsub = string.gsub
+-----------------------------------------------------------------------
 
+-- request handler ----------------------------------------------------
 function main(web, req)
+  --Get the private token used for signing Textmarks requests.
   local textmarks_token = mongodb:query('keys',
-    {textmarks_token = {["$exists"] = true}}):next().textmarks_token
-
-  local params=web:params()
-
-  local msg = params.msg or ""
-  local tel = params.tel or "+16107610054"
-  local uid = params.uid or "1277842"
-  local act = params.act or "REQ"
-  local rqt = params.rqt
-  local kwd = params.kwd
-  local sig = params.sig
-
-  local digest=kwd and tel and rqt
-    and hmac(kwd..tel..rqt,textmarks_token)
-  local signed = sig and sig == digest
-
-  do --logging
-    local lmc={}
-
-    lmc.date = os.date("Message recieved %c",rqt and tonumber(rqt))
-
-    if act=="REQ" then
-      lmc.what = "body: "..msg
-    else
-      lmc.what = "action: "..act
-    end
-
-    lmc.from = tel
-
-    if signed then
-      lmc.sigstat = "Signature OK"
-    else
-      if sig then
-        lmc.sigstat = format([[
-Bad signature:
-  Recieved: %q
-  %s]], sig, digest and format("Expected: %q",digest) or
-          format("kwd: %s tel: %s rqt: %s",
-            tostring(kwd),tostring(tel),tostring(rqt)))
-      else
-        lmc.sigstat = "No signature"
-      end
-    end
-
-    moai.log(gsub([[
-$date
-$what
-from: $from
-$sigstat
-]],"%$(%w*)",lmc),signed and "INFO" or "WARN")
+    {textmarks_token = {["$exists"] = true}}):next()
+  --If the query turned up nil (no token), then keep calm and carry on.
+  --Otherwise, hoist that token.
+  if textmarks_token then
+    textmarks_token = textmarks_token.textmarks_token
   end
 
+  --Gather the parameters of the request.
+  local params = web:params()
+
+  ------ Parameters ------
+
+  -- The message recieved.
+  local msg = params.msg or ""
+  -- The requesting phone number. (Used in verification.)
+  local tel = params.tel or "+16107610054"
+  -- The TextMarks UID of the requesting user.
+  local uid = params.uid or "1277842"
+  -- The TextMarks action code:
+  -- REQ for user messages to the TextMark,
+  -- SUB or UNSUB for subscription management requests
+  --   generated through the TextMarks system.
+  local act = params.act or "REQ"
+  -- The epoch time of the request (used in verification).
+  local rqt = params.rqt
+  -- The keyword the request was sent to (useful for hosting
+  --   multiple TextMarks with one application).
+  -- Also used in verification.
+  local kwd = params.kwd
+  -- The signature sent by TextMarks.
+  local sig = params.sig
+
+  --The calculated digest of the message
+  --(requires all components to be present).
+  local digest = kwd and tel and rqt and textmarks_token
+    and hmac(kwd..tel..rqt,textmarks_token)
+
+  --Whether the message was signed with the calculated signature.
+  --If this value isn't true, the message should not be trusted
+  --(don't allow any changes, but you can still respond).
+  local signed = sig and sig == digest
+
+  -------------------------
+
+  do ---- logging ----
+    local lmc = {}
+
+    lmc.date = os.date "%c"
+    lmc.rqt = rqt
+    lmc.rct = os.time()
+    lmc.tel = tel
+    lmc.uid = uid
+    lmc.act = act
+    lmc.msg = msg
+    lmc.kwd = kwd
+    lmc.signed = signed
+    -- Don't log valid signatures.
+    if not signed then lmc.sig = sig
+  end --- logging ----
+
+  ------ User data manipulation functions ------
   local function get(key)
     local cursor = mongodb:query('users', {uid = uid})
     local usertable = cursor:next()
@@ -92,26 +107,41 @@ $sigstat
     mongodb:update('users', {uid = uid}, {['$unset']={[key]=1}}, true)
   end
 
+  ------ Local toolbox ------
+
+  -- Send the page response.
   local function respond(body)
     web:page(body,200,'OK')
   end
 
+  --Insert a string into another string as indicated by the '@'.
   local function atk(fmat,kword)
     return gsub(fmat,'@',kword)
   end
 
+  ------ Action ------
+  -- Save this user's telephone number.
   set("tel",tel)
 
+  -- Subscription handling
   if act=="SUB" then
     set("subscribed",true)
     respond""
   elseif act=="UNSUB" then
     unset("subscribed")
     respond""
-  else
-    local username=get("name")
 
-    --empty messages
+  -- Request handling
+  else
+    -- If this is somehow not a REQ, something's up
+    if act=~"REQ" then
+      moai.log("Unrecognized action type "..act,"WARN")
+    end
+
+    -- Get the given name for this user, if they've given one.
+    local username = get("name")
+
+    -- empty messages
     if msg=="" then
       if not username then
         respond('Text "LOLOL name" followed by your name!')
@@ -119,7 +149,9 @@ $sigstat
         respond(atk('Y helo thar, @!',username))
       end
 
-    --begin inserting your elseifs here...
+    -- Other message situations:
+
+    --message starts with "name"
     elseif msg:find"^name" then
       local uname=msg:match"^name%s*(.-)$"
       if uname then
@@ -140,6 +172,9 @@ $sigstat
         respond("Didn't get a name. "..
         'Try just a space between "lolol name" and your name.')
       end
+
+    --message is one of the odd things I intercepted in the original
+    --run off of a laptop at Charlie's
     elseif msg=="matt stupid" then
       respond"So I've heard."
 
