@@ -95,9 +95,6 @@ function main(web, req)
   end
 
   ------ Action ------
-  -- Save this user's telephone number.
-  set("tel",tel)
-
   -- Subscription handling
   if act=="SUB" then
   elseif act=="UNSUB" then
@@ -110,5 +107,5 @@ function main(web, req)
     end
 
     respond"I don't know, probably some guy."
-end
+  end
 end
