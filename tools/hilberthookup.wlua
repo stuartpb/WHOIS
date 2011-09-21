@@ -13,6 +13,30 @@ local json = require'dkjson'.use_lpeg()
 local floor = math.floor
 local ceil = math.ceil
 
+-- Parameters -----------------------------------------------------
+-- Diameter of a node
+local node_diam = 100
+-- The gap between nodes.
+local node_gap = 40
+-- The first connection width.
+local bandw = 25
+-- The reduction in size of each successive band.
+local bandr = 2
+
+-- Variables ------------------------------------------------------
+--The name of the active person node.
+local active_person
+--The zoom multiplier.
+local zoom = 1
+-- The center of the viewport.
+local center = {x=0, y=0}
+-- The edges and dimensions of the viewport.
+-- Updated when moving and resizing.
+local viewport = {width=0, height=0, left=0, right=0, top=0, bottom=0}
+
+-- Forward declaration --------------------------------------------
+local post_load
+
 -- Data serialization and synthesis -------------------------------
 
 -- The array of person tables.
@@ -44,12 +68,12 @@ end
 local function populate()
   --Determine necessary power of two to fit all nodes.
   local n = 1
-  while 2^n < #people do
-    n=n+1
+  while n^2 < #people do
+    n = n * 2
   end
 
   nodes = {}
-  for i=1, 2^n do
+  for i=1, n do
     nodes[i] = {}
   end
   positions = {}
@@ -85,7 +109,7 @@ local function populate()
 
   -- populate nodes and positions
   for d=1, #people do
-    local x, y = d2xy(d)
+    local x, y = d2xy(d-1)
     nodes[y+1][x+1] = people[d]
     positions[people[d].name] = {d=d, x=x, y=y, inbound = {}}
   end
@@ -96,6 +120,12 @@ local function populate()
     end
   end
 
+  local midx, midy = d2xy(floor(#people/2))
+  --center.x = midx * (node_diam + node_gap)
+  --center.y = midy * (node_diam + node_gap)
+
+  --Update the canvas
+  post_load()
 end
 
 local function save_people(filename)
@@ -106,23 +136,6 @@ local function save_people(filename)
     }))
   file:close()
 end
-
--- Parameters -----------------------------------------------------
--- Diameter of a node
-local node_diam = 100
--- The gap between nodes.
-local node_gap = 40
--- The first connection width.
-local bandw = 25
--- The reduction in size of each successive band.
-local bandr = 2
-
--- Variables ------------------------------------------------------
---The name of the active person node.
-local active_person = 1
-local zoom = 1
-local topcorner = 50
-local leftcorner = 50
 
 -- Dialogs --------------------------------------------------------
 local function file_dlg(
@@ -216,8 +229,8 @@ do
   end
 
   function nodexy_to_screenxy(x,y)
-    return topcorner + (sc_from_nc(x) * zoom),
-      leftcorner + (sc_from_nc(y) * zoom)
+    return viewport.left + (sc_from_nc(x) * zoom),
+      viewport.top + (sc_from_nc(y) * zoom)
   end
 
   function screenxy_to_nodexy(sx,sy)
@@ -225,7 +238,7 @@ do
     local function cell_of_sc(sc)
       return ceil(sc/cell_size)
     end
-    local nx, ny = cell_of_sc(sx-topcorner), cell_of_sc(sy-leftcorner)
+    local nx, ny = cell_of_sc(sx-viewport.left), cell_of_sc(sy-viewport.top)
     --Center of node on screen
     local cx, cy = sc_from_nc(nx), sc_from_nc(ny)
 
@@ -240,13 +253,13 @@ do
   end
 end
 
--- Viewport -------------------------------------------------------
+-- Nodes ----------------------------------------------------------
 
-local can
+local bb, can
 function canvas:map_cb()
-  can=cd.CreateCanvas(cd.IUP,self)
+  bb=cd.CreateCanvas(cd.IUP,self)
+  can=cd.CreateCanvas(cd.DBUFFER,bb)
   can:YAxisMode(0)
-  can:Flush()
 end
 
 function canvas:action()
@@ -262,14 +275,14 @@ function canvas:action()
         if node then
           local sx, sy = nodexy_to_screenxy(nx,ny)
           can:Foreground(cd.GRAY)
-          can:Sector(sx,sy,node_diam,node_diam,0,360)
+          can:Sector(sx,sy,node_diam * zoom,node_diam * zoom,0,360)
           can:Foreground(cd.BLACK)
           can:Text(sx,sy,node.name)
         end
       end
     end
   else
-    can:TextAlignment(cd.CENTER)
+    can:TextAlignment(cd.SOUTH)
     can:TextOrientation(0)
     can:Foreground(cd.YELLOW)
     can:Sector(w/2,h/2,40,40,0,360)
@@ -277,6 +290,62 @@ function canvas:action()
     can:Text(w/2,h/2,"load some people")
   end
   can:Flush()
+end
+
+local function recalculate_extents()
+  viewport.left = center.x - viewport.width/2 * zoom
+  viewport.right = center.x + viewport.width/2 * zoom
+  viewport.top = center.y - viewport.width/2 * zoom
+  viewport.bottom = center.y + viewport.width/2 * zoom
+  dlg.title = string.format("%i %i %i %i %i %i",
+        viewport.left,viewport.right,viewport.top,viewport.bottom,
+        center.x,center.y)
+end
+
+do
+  local downx, downy
+
+  local function pan(x,y,status)
+    if downx then
+      center.x = center.x + (x - downx)
+      center.y = center.y + (y - downy)
+      recalculate_extents()
+      iup.Update(canvas)
+    end
+    if iup.isbutton1(status) then
+      downx = x
+      downy = y
+    else
+      downx = nil
+      downy = nil
+    end
+  end
+
+  function canvas:BUTTON_CB(but,pressed,x,y,status)
+    pan(x,y,status)
+  end
+
+  function canvas:motion_cb(x, y, status)
+    pan(x,y,status)
+  end
+
+  function canvas:wheel_cb(delta)
+    zoom = zoom + delta * .1
+    recalculate_extents()
+    iup.Update(canvas)
+  end
+end
+
+function canvas:resize_cb(w, h)
+  viewport.width = w
+  viewport.height = h
+  recalculate_extents()
+
+end
+
+-- Hooks ----------------------------------------------------------
+function post_load()
+  iup.Update(canvas)
 end
 
 -- Action ---------------------------------------------------------
