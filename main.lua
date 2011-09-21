@@ -21,6 +21,7 @@ end
 -- local toolbox ------------------------------------------------------
 local format = string.format
 local gsub = string.gsub
+local lower = string.lower
 -----------------------------------------------------------------------
 
 -- request handler ----------------------------------------------------
@@ -85,6 +86,8 @@ function main(web, req)
     lmc.signed = signed
     -- Don't log valid signatures.
     if not signed then lmc.sig = sig end
+
+    mongodb:insert('logs',lmc)
   end --- logging ----
 
   ------ Local toolbox ------
@@ -92,6 +95,37 @@ function main(web, req)
   -- Send the page response.
   local function respond(body)
     web:page(body,200,'OK',{["content-type"] = "text/plain"})
+  end
+
+  --Insert a string into another string as indicated by the '@'.
+  local function atk(fmat,kword)
+    return gsub(fmat,'@',kword)
+  end
+
+  ------ Verbs ------
+  local doc = {}
+  local verbs = {}
+
+  function verbs.is(pre,post)
+    mongodb:insert('suggestions',{who=pre,body=post})
+    respond(atk("Thank you for describing @! It will be reviewed for inclusion.",pre))
+  end
+
+  function verbs.help(pre, post)
+
+  end
+
+  --regular action.
+  local function whois(name)
+    local cur = mongodb:query('people',
+      {name = name})
+    local entry = cur:next()
+    if entry then
+      respond(entry.body)
+    else
+      respond(atk("No entry for @. Feel free to suggest one by replying "..
+        'with "whois @ #is <description>".', name))
+    end
   end
 
   ------ Action ------
@@ -106,6 +140,18 @@ function main(web, req)
       moai.log("Unrecognized action type "..act,"WARN")
     end
 
-    respond"I don't know, probably some guy."
+    local pre,space,verb,post = msg:match("^(.-)(%s*)[%-%#%*](%w*)%s*(.-)$")
+
+    --empte message repsonse
+    if msg == "" then
+      respond 'Text "whois <name>" to look up a name, or "whois #help" for advanced usage.'
+    elseif pre and
+    --if the verb identifier is after some space or first in the msg
+      (#space > 0 or #pre == 0)
+      --and the verb
+      and verb and verbs[lower(verb)]
+    then verbs[lower(verb)](pre,post)
+    else whois(msg)
+    end
   end
 end
