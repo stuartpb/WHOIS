@@ -12,6 +12,9 @@ local json = require'dkjson'.use_lpeg()
 -- Local toolbox --------------------------------------------------
 local floor = math.floor
 local ceil = math.ceil
+local max = math.max
+local min = math.min
+local sqrt = math.sqrt
 
 -- Parameters -----------------------------------------------------
 -- Diameter of a node
@@ -101,7 +104,7 @@ local function populate()
   for d=1, #people do
     local x, y = d2xy(d-1)
     nodes[y+1][x+1] = people[d]
-    positions[people[d].name] = {d=d, x=x, y=y, inbound = {}}
+    positions[people[d].name] = {d=d, x=x+1, y=y+1, inbound = {}}
   end
   -- populate incoming connections
   for d=1, #people do
@@ -129,13 +132,15 @@ end
 
 -- Dialogs --------------------------------------------------------
 local function file_dlg(
-  dlg_type, dlg_title, dlg_extfilter,
+  dlg_type, dlg_title, default_file,
+  dlg_extfilter,
   filename_operation)
 
   local filedlg = iup.filedlg{
     dialogtype = dlg_type,
     title = dlg_title,
-    extfilter = dlg_extfilter
+    extfilter = dlg_extfilter,
+    file = default_file
   }
 
   filedlg:popup()
@@ -151,6 +156,7 @@ end
 local function open_json()
   file_dlg("OPEN",
     "Open People",
+    "people.json",
     "JSON Files|*.json|"..
     "All Files|*.*|",
     function(filename)
@@ -162,6 +168,7 @@ end
 local function save_json()
   file_dlg("Save",
     "Save People",
+    "people.json",
     "JSON Files|*.json|"..
     "All Files|*.*|",
     function(filename)
@@ -203,13 +210,13 @@ local dlg = iup.dialog{
 local nodexy_to_screenxy, screenxy_to_nodexy
 do
   local function sc_from_nc(nc)
-    return node_diam * (nc-.5)
-      + node_gap * (nc-1)
+    return (node_diam * (nc-.5)
+      + node_gap * (nc-1)) * zoom
   end
 
   function nodexy_to_screenxy(x,y)
-    return viewport.left + (sc_from_nc(x) * zoom),
-      viewport.top + (sc_from_nc(y) * zoom)
+    return viewport.left + sc_from_nc(x),
+      viewport.top + sc_from_nc(y)
   end
 
   function screenxy_to_nodexy(sx,sy)
@@ -217,14 +224,19 @@ do
     local function cell_of_sc(sc)
       return ceil(sc/cell_size)
     end
+
     local nx, ny = cell_of_sc(sx-viewport.left), cell_of_sc(sy-viewport.top)
     --Center of node on screen
-    local cx, cy = sc_from_nc(nx), sc_from_nc(ny)
+    local cx, cy = sc_from_nc(nx)+viewport.left, sc_from_nc(ny)+viewport.top
+
+  dlg.title = string.format("%i %i %i %i %i %i %f %f",
+        nx, ny, cx,cy,sx,sy, (cx-sx)^2 + (cy-sy)^2,
+       (zoom * node_diam/2)^2)
 
     -- If the cell is within range
-    if nx < 0 and ny < 0 and nx >= #nodes and ny >= #nodes
+    if nx > 0 and ny > 0 and nx <= #nodes and ny <= #nodes
     --And the screen coordinate is within the node for its cell
-      and sqrt((cx-sx)^2 + (cx-sx)^2) < node_diam/2
+      and (cx-sx)^2 + (cy-sy)^2 < (zoom * node_diam/2)^2
     then return nx, ny
     --return nil for non-node screen coordinates
     else return nil
@@ -238,7 +250,6 @@ local bb, can
 function canvas:map_cb()
   bb=cd.CreateCanvas(cd.IUP,self)
   can=cd.CreateCanvas(cd.DBUFFER,bb)
-  can:YAxisMode(0)
 end
 
 function canvas:action()
@@ -247,24 +258,46 @@ function canvas:action()
   can:Clear()
   can:TextAlignment(cd.CENTER)
   if nodes then
-    can:TextOrientation(45)
     for ny=1, #nodes do
       for nx=1, #nodes do
       local node = nodes[ny][nx]
         if node then
           local sx, sy = nodexy_to_screenxy(nx,ny)
-          can:Foreground(cd.GRAY)
-          can:Sector(sx,sy,node_diam * zoom,node_diam * zoom,0,360)
-          can:Foreground(cd.BLACK)
-          can:Text(sx,sy,node.name)
+          sy = can:InvertYAxis(sy)
+          if node.name ~= active_person then
+            can:Foreground(cd.GRAY)
+            can:Sector(sx,sy,node_diam * zoom,node_diam * zoom,0,360)
+          end
         end
       end
     end
+    can:TextOrientation(20)
+    for ny=1, #nodes do
+      for nx=1, #nodes do
+      local node = nodes[ny][nx]
+        if node then
+          local sx, sy = nodexy_to_screenxy(nx,ny)
+          sy = can:InvertYAxis(sy)
+          if node.name ~= active_person then
+            can:Foreground(cd.EncodeColor(min(#node.body/80,1)*255,0,0))
+            can:Text(sx,sy,node.name)
+          end
+        end
+      end
+    end
+    if active_person then
+      local position = positions[active_person]
+      local node = people[position.d]
+      local sx, sy = nodexy_to_screenxy(position.x,position.y)
+      sy = can:InvertYAxis(sy)
+      can:Foreground(cd.YELLOW)
+      can:Sector(sx,sy,node_diam * zoom,node_diam * zoom,0,360)
+      can:Foreground(cd.EncodeColor(min(#node.body/80,1)*255,0,0))
+      can:Text(sx,sy,node.name)
+    end
   else
-    can:TextAlignment(cd.SOUTH)
+    can:TextAlignment(cd.CENTER)
     can:TextOrientation(0)
-    can:Foreground(cd.YELLOW)
-    can:Sector(w/2,h/2,40,40,0,360)
     can:Foreground(cd.BLACK)
     can:Text(w/2,h/2,"load some people")
   end
@@ -272,10 +305,10 @@ function canvas:action()
 end
 
 local function recalculate_extents()
-  viewport.left = center.x - viewport.width/2 * zoom
-  viewport.right = center.x + viewport.width/2 * zoom
-  viewport.top = center.y - viewport.width/2 * zoom
-  viewport.bottom = center.y + viewport.width/2 * zoom
+  viewport.left = center.x + viewport.width/2
+  viewport.right = center.x - viewport.width/2
+  viewport.top = center.y + viewport.height/2
+  viewport.bottom = center.y - viewport.height/2
   dlg.title = string.format("%i %i %i %i %i %i",
         viewport.left,viewport.right,viewport.top,viewport.bottom,
         center.x,center.y)
@@ -291,7 +324,7 @@ do
       recalculate_extents()
       iup.Update(canvas)
     end
-    if iup.isbutton1(status) then
+    if iup.isbutton2(status) then
       downx = x
       downy = y
     else
@@ -300,8 +333,28 @@ do
     end
   end
 
-  function canvas:BUTTON_CB(but,pressed,x,y,status)
+  local function select_node(x, y)
+    local node = nodes[y][x]
+    active_person = node.name
+    desc.value = node.body
+    iup.Update(canvas)
+  end
+  local function deselect_node()
+    active_person = nil
+    desc.value = ""
+    iup.Update(canvas)
+  end
+
+  function canvas:button_cb(but,pressed,x,y,status)
     pan(x,y,status)
+    if pressed == 0 and but == iup.BUTTON1 then
+      local nx, ny = screenxy_to_nodexy(x,y)
+      if nx then
+        select_node(nx, ny)
+      else
+        deselect_node()
+      end
+    end
   end
 
   function canvas:motion_cb(x, y, status)
@@ -309,7 +362,7 @@ do
   end
 
   function canvas:wheel_cb(delta)
-    zoom = zoom + delta * .1
+    zoom = max(zoom + delta * .1, .1)
     recalculate_extents()
     iup.Update(canvas)
   end
