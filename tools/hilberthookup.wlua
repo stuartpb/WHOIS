@@ -49,9 +49,10 @@ local function populate()
   end
 
   nodes = {}
-  for i=1, n do
+  for i=1, 2^n do
     nodes[i] = {}
   end
+  positions = {}
 
   local function d2xy(d)
     local x, y = 0, 0
@@ -62,7 +63,7 @@ local function populate()
       local rx = floor(t/2) % 2 ~= 0
       local ry = not ((t%2 ~= 0) == rx)
       -- rotate
-      if ry then
+      if not ry then
         if rx then
           x = s-1 - x
           y = s-1 - y
@@ -85,12 +86,12 @@ local function populate()
   -- populate nodes and positions
   for d=1, #people do
     local x, y = d2xy(d)
-    nodes[x][y] = people[d]
+    nodes[y+1][x+1] = people[d]
     positions[people[d].name] = {d=d, x=x, y=y, inbound = {}}
   end
   -- populate incoming connections
   for d=1, #people do
-    for similar in people[d].links do
+    for i, similar in pairs(people[d].links) do
       table.insert(lookup[similar].inbound,people[d].name)
     end
   end
@@ -99,7 +100,7 @@ end
 
 local function save_people(filename)
   local file = io.open(filename, 'w')
-  file:write(json:encode(people,{
+  file:write(json.encode(people,{
     indent = true,
     keyorder = {"name","body","links"},
     }))
@@ -108,7 +109,7 @@ end
 
 -- Parameters -----------------------------------------------------
 -- Diameter of a node
-local node_diam = 250
+local node_diam = 100
 -- The gap between nodes.
 local node_gap = 40
 -- The first connection width.
@@ -123,11 +124,78 @@ local zoom = 1
 local topcorner = 50
 local leftcorner = 50
 
+-- Dialogs --------------------------------------------------------
+local function file_dlg(
+  dlg_type, dlg_title, dlg_extfilter,
+  filename_operation)
+
+  local filedlg = iup.filedlg{
+    dialogtype = dlg_type,
+    title = dlg_title,
+    extfilter = dlg_extfilter
+  }
+
+  filedlg:popup()
+
+  local status = tonumber(filedlg.status)
+
+  if status > -1 then --not canceled
+    filename_operation(filedlg.value)
+  end
+
+end
+
+local function open_list()
+  file_dlg("OPEN",
+    "Open Colon-Separated List",
+    "All Files|*.*|",
+    function(filename)
+      parse_colon_list(filename)
+      populate()
+    end)
+end
+
+local function open_json()
+  file_dlg("OPEN",
+    "Open JSON List",
+    "JSON Files|*.json|"..
+    "All Files|*.*|",
+    function(filename)
+      parse_json(filename)
+      populate()
+    end)
+end
+
+local function save_json()
+  file_dlg("Save",
+    "Save JSON List",
+    "JSON Files|*.json|"..
+    "All Files|*.*|",
+    function(filename)
+      save_people(filename)
+    end)
+end
+
 -- Window ---------------------------------------------------------
+local menu = iup.menu{
+  {"File",iup.menu{
+    iup.item{title="Open Colon-Separated List...",
+      action=open_list},
+    iup.item{title="Open JSON List...",
+      action=open_json},
+    {},
+    iup.item{title="Save People...",
+      action=save_json},
+    iup.item{title="Exit",
+      action=iup.ExitLoop},
+  }},
+}
+
 local canvas = iup.canvas{}
 local desc = iup.text{expand="horizontal"}
 local descsave = iup.button{title="Save"}
 local dlg = iup.dialog{
+  menu = menu,
   title = "WHOIS it?",
   shrink = "yes",
   size="HALFxHALF";
@@ -196,7 +264,7 @@ function canvas:action()
           can:Foreground(cd.GRAY)
           can:Sector(sx,sy,node_diam,node_diam,0,360)
           can:Foreground(cd.BLACK)
-          can:Text(sx,sy,node)--.name)
+          can:Text(sx,sy,node.name)
         end
       end
     end
