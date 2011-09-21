@@ -47,16 +47,6 @@ local nodes
 local lookup
 
 --Input parsing.
-local function parse_colon_list(filename)
-  people = {}
-  local file = io.open(filename)
-  for line in file:lines() do
-    local name, desc = line:match"^(.-)%:%s*(.-)$"
-    people[#people+1] = {name = name, body = desc, links = {}}
-  end
-  file:close()
-end
-
 local function parse_json(filename)
   local file = io.open(filename)
   local content = file:read"*a"
@@ -158,19 +148,9 @@ local function file_dlg(
 
 end
 
-local function open_list()
-  file_dlg("OPEN",
-    "Open Colon-Separated List",
-    "All Files|*.*|",
-    function(filename)
-      parse_colon_list(filename)
-      populate()
-    end)
-end
-
 local function open_json()
   file_dlg("OPEN",
-    "Open JSON List",
+    "Open People",
     "JSON Files|*.json|"..
     "All Files|*.*|",
     function(filename)
@@ -181,7 +161,7 @@ end
 
 local function save_json()
   file_dlg("Save",
-    "Save JSON List",
+    "Save People",
     "JSON Files|*.json|"..
     "All Files|*.*|",
     function(filename)
@@ -192,13 +172,12 @@ end
 -- Window ---------------------------------------------------------
 local menu = iup.menu{
   {"File",iup.menu{
-    iup.item{title="Open Colon-Separated List...",
-      action=open_list},
-    iup.item{title="Open JSON List...",
+    iup.item{title="Open People...",
       action=open_json},
     {},
     iup.item{title="Save People...",
       action=save_json},
+    {},
     iup.item{title="Exit",
       action=iup.ExitLoop},
   }},
